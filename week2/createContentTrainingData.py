@@ -4,11 +4,21 @@ import glob
 from tqdm import tqdm
 import os
 import random
+import re
+import pandas as pd
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from nltk.stem.snowball import EnglishStemmer
+import csv
 
 def transform_name(product_name):
     # IMPLEMENT
+    product_name = product_name.lower().strip()
+    product_name = re.sub(r"'\W+'mg", "", product_name)
+
+    stemmer = EnglishStemmer()
+    product_name = stemmer.stem(product_name)
+
     return product_name
 
 # Directory for product data
@@ -73,10 +83,14 @@ if __name__ == '__main__':
 
     print("Writing results to %s" % output_file)
     with multiprocessing.Pool() as p:
+        df = pd.DataFrame()
         all_labels = tqdm(p.imap_unordered(_label_filename, files), total=len(files))
+        for label in all_labels:
+            df = df.append(label)
 
+        df = df.rename(columns={0: "category", 1 : "title"})
+        grouped_df = df.groupby("category").filter(lambda x: len(x) > min_products)
 
         with open(output_file, 'w') as output:
-            for label_list in all_labels:
-                for (cat, name) in label_list:
-                    output.write(f'__label__{cat} {name}\n')
+            for index, row in grouped_df.iterrows():
+                output.write(f'__label__{row["category"]} {row["title"]}\n')
