@@ -179,7 +179,7 @@ cheats 0.636772
 boy 0.629217
 ```
 
-Using model with epochs 25 and minCount 20. From couple tests I will pick **0.70** treshold score.
+Using model with epochs 25 and minCount 20. From couple tests I pick **0.70** treshold score.
 
 # Level 3
 
@@ -205,4 +205,4 @@ Seems kinda bad synonyms that I have with this model. For example with `earbuds`
     ...
 ``` 
 
-Overall my synonyms was quete bad. Need to return to synonims generation step and try different model.
+Overall my synonyms were quite bad. Need to return to the synonyms generation step and try different model.
