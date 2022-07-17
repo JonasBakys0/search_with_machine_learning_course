@@ -15,10 +15,29 @@ import sys
 import nltk
 import fasttext
 
+from sentence_transformers import SentenceTransformer
+
+sentence_transformers_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logging.basicConfig(format='%(levelname)s:%(message)s')
+
+def create_vector_query(model, query, size):
+    embedding = model.encode([query])[0].tolist()
+    query ={
+        "size": size,
+        "query": {
+            "knn": {
+            "embedding": {
+                "vector": embedding,
+                "k": 3
+            }
+            }
+        }
+    }
+
+    return query
 
 # expects clicks and impressions to be in the row
 def create_prior_queries_from_group(
@@ -203,7 +222,7 @@ def normalize_query(query: str) -> str:
 
     return query
 
-def search(client, user_query, min_score, index="bbuy_products", sort="_score", sortDir="desc", name_option="name"):
+def search(client, user_query, min_score, size, index="bbuy_products", sort="_score", sortDir="desc", name_option="name", vector=False):
     #### W3: classify the query
     normalized_query = normalize_query(user_query)
     filter_categories = None
@@ -228,7 +247,11 @@ def search(client, user_query, min_score, index="bbuy_products", sort="_score", 
 
     #### W3: create filters and boosts
     # Note: you may also want to modify the `create_query` method above
-    query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], name_option=name_option, categories=filter_categories)
+    if vector:
+        query_obj = create_vector_query(sentence_transformers_model, user_query, size)
+    else:
+        query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], name_option=name_option, categories=filter_categories)
+
     logging.info(query_obj)
     response = client.search(query_obj, index=index)
     if response and response['hits']['hits'] and len(response['hits']['hits']) > 0:
@@ -254,6 +277,10 @@ if __name__ == "__main__":
                          help="If true the match is made on Synoymns")
     general.add_argument("--min_score", type=float, default=0.5,  
                          help="minimum score that predicted queries should have")
+    general.add_argument("--vector", type=bool, default=False,  
+                         help="use vector search")
+    general.add_argument("--size", type=int, default=1,  
+                         help="how many results to return")
 
     args = parser.parse_args()
 
@@ -265,6 +292,8 @@ if __name__ == "__main__":
     port = args.port
     synonyms = args.synonyms
     min_score = args.min_score
+    vector = args.vector
+    size = args.size
     if args.user:
         password = getpass()
         auth = (args.user, password)
@@ -291,7 +320,7 @@ if __name__ == "__main__":
         query = line.rstrip()
         if query == "Exit":
             break
-        search(client=opensearch, user_query=query, index=index_name, name_option=name_option, min_score=min_score)
+        search(client=opensearch, user_query=query, index=index_name, name_option=name_option, min_score=min_score, vector=vector, size=size)
 
         print(query_prompt)
 
