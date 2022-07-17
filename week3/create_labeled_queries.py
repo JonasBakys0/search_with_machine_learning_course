@@ -7,7 +7,13 @@ import csv
 
 # Useful if you want to perform stemming.
 import nltk
-stemmer = nltk.stem.PorterStemmer()
+
+def transform_queries(df):
+    stemmer = nltk.stem.PorterStemmer()
+    df['query'] = df['query'].str.lower()
+    df['query'] = df['query'].apply(lambda query: ' '.join([stemmer.stem(token) for token in query.split()]))
+
+    return df
 
 categories_file_name = r'/workspace/datasets/product_data/categories/categories_0001_abcat0010000_to_pcmcat99300050000.xml'
 
@@ -49,12 +55,27 @@ df = pd.read_csv(queries_file_name)[['category', 'query']]
 df = df[df['category'].isin(categories)]
 
 # IMPLEMENT ME: Convert queries to lowercase, and optionally implement other normalization, like stemming.
+df = transform_queries(df)
 
 # IMPLEMENT ME: Roll up categories to ancestors to satisfy the minimum number of queries per category.
+group_by_df = df.groupby('category').size().reset_index(name='count')
+df_merged = df.merge(group_by_df, how='left', on='category').merge(parents_df, how='left', on='category')
+print(df_merged)
+
+num_of_subthreshold_categories = len(group_by_df[group_by_df['count'] < min_queries])
+print("Number of sub-threshold categories:" + str(num_of_subthreshold_categories))
+while num_of_subthreshold_categories > 0:
+    df_merged.loc[df_merged['count'] < min_queries, 'category'] = df_merged['parent']
+    df = df_merged[['category', 'query']]
+    df = df[df['category'].isin(categories)]
+    group_by_df = df.groupby('category').size().reset_index(name='count')
+    df_merged = df.merge(group_by_df, how='left', on='category').merge(parents_df, how='left', on='category')
+    num_of_subthreshold_categories = len(group_by_df[group_by_df['count'] < min_queries])
+    print("Number of sub-threshold categories:" + str(num_of_subthreshold_categories))
 
 # Create labels in fastText format.
 df['label'] = '__label__' + df['category']
-
+    
 # Output labeled query data as a space-separated file, making sure that every category is in the taxonomy.
 df = df[df['category'].isin(categories)]
 df['output'] = df['label'] + ' ' + df['query']

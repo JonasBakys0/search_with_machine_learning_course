@@ -12,6 +12,8 @@ import pandas as pd
 import fileinput
 import logging
 import sys
+import nltk
+import fasttext
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ def create_prior_queries(doc_ids, doc_id_weights,
 
 
 # Hardcoded query here.  Better to use search templates or other query config.
-def create_query(user_query, click_prior_query, filters, sort="_score", sortDir="desc", size=10, source=None, name_option="name"):
+def create_query(user_query, click_prior_query, filters, sort="_score", sortDir="desc", size=10, source=None, name_option="name", categories=None):
     query_obj = {
         'size': size,
         "sort": [
@@ -184,14 +186,49 @@ def create_query(user_query, click_prior_query, filters, sort="_score", sortDir=
             print("Couldn't replace query for *")
     if source is not None:  # otherwise use the default and retrieve all source
         query_obj["_source"] = source
+    if categories:
+        query_obj["query"]["function_score"]["query"]["bool"]["must"].append({
+            "terms": {
+                "categoryPathIds.keyword": categories
+            }
+        })
     return query_obj
 
+model = fasttext.load_model('../datasets/query_model.bin')
 
-def search(client, user_query, index="bbuy_products", sort="_score", sortDir="desc", name_option="name"):
+def normalize_query(query: str) -> str:
+    stemmer = nltk.stem.PorterStemmer()
+    query = query.lower()
+    query = ' '.join([stemmer.stem(token) for token in query.split()])
+
+    return query
+
+def search(client, user_query, min_score, index="bbuy_products", sort="_score", sortDir="desc", name_option="name"):
     #### W3: classify the query
+    normalized_query = normalize_query(user_query)
+    filter_categories = None
+    categories, probabilities = model.predict(normalized_query, k=5)
+    predicted_categoriers = list(zip(categories, probabilities))
+
+    print(f'Query: {normalized_query}')
+    print(f'predicted_categoriers: {predicted_categoriers}')
+
+    prediction = 0
+    categories = []
+
+    for category in predicted_categoriers:
+        if prediction > min_score:
+            break
+
+        categories.append(category[0].replace('__label__',''))
+        prediction += category[1] 
+
+    if prediction > min_score:
+        filter_categories = categories
+
     #### W3: create filters and boosts
     # Note: you may also want to modify the `create_query` method above
-    query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], name_option=name_option)
+    query_obj = create_query(user_query, click_prior_query=None, filters=None, sort=sort, sortDir=sortDir, source=["name", "shortDescription"], name_option=name_option, categories=filter_categories)
     logging.info(query_obj)
     response = client.search(query_obj, index=index)
     if response and response['hits']['hits'] and len(response['hits']['hits']) > 0:
@@ -215,6 +252,8 @@ if __name__ == "__main__":
                          help='The OpenSearch admin.  If this is set, the program will prompt for password too. If not set, use default of admin/admin')
     general.add_argument("--synonyms", type=bool, default=False,  
                          help="If true the match is made on Synoymns")
+    general.add_argument("--min_score", type=float, default=0.5,  
+                         help="minimum score that predicted queries should have")
 
     args = parser.parse_args()
 
@@ -225,6 +264,7 @@ if __name__ == "__main__":
     host = args.host
     port = args.port
     synonyms = args.synonyms
+    min_score = args.min_score
     if args.user:
         password = getpass()
         auth = (args.user, password)
@@ -251,7 +291,7 @@ if __name__ == "__main__":
         query = line.rstrip()
         if query == "Exit":
             break
-        search(client=opensearch, user_query=query, index=index_name, name_option=name_option)
+        search(client=opensearch, user_query=query, index=index_name, name_option=name_option, min_score=min_score)
 
         print(query_prompt)
 
